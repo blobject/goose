@@ -1,0 +1,14 @@
+* goose
+
+** About
+
+Goose (or goosewm) is an X window manager written in Tcl/Tk and C.
+
+** Status
+
+/Just started, work in progress/
+
+** Run
+
+/TODO/
+
