@@ -1,14 +1,48 @@
 * goose
 
-** About
+*Status:* pre-alpha
 
-Goose (or goosewm) is an X window manager written in Tcl/Tk and C.
+Goose is a wayland compositor written in c and tcl/tk.
 
-** Status
+Aspired features include:
+- good use of wlroots (device detection, multi-monitor, screensharing, etc.)
+- control, configuration, hackability via tcl, json
+- gui hackability via tk
+- stacked windows by default
+- grouping (tabs, piles, concats)
+- tagging (workspace-like behavior)
+- marking (for quick focusing)
+- overview (mac's exposé, spaces, mosaic, etc.; an extended alt-tab; a graphical configuration tool)
 
-/Just started, work in progress/
 
-** Run
+Terms:
+- input: mouse, keyboard, etc.
+- output: monitor, etc.
+- root: structure of all frames
+- view: visible space, contains subset of all frames
+- frame: contains windows
+  - tab: laid out in tabs, front window totally visible, the rest totally hidden
+  - pile: laid out in piles, front window totally visible, the rest partially/totally hidden
+  - concat: laid out flat and adjoined, all windows totally visible
+- window: an application's immediate graphical representation
+- tag: an index on frames for visibility-toggling
+- mark: an index on frames for focus-toggling
+- get: state query (by a client)
+- set: state modification request (by a client)
 
-/TODO/
+** Build
+
+1. ~cd goose/~
+1. ~$EDITOR config.mk~ and ~make~
+1. ~./build/goose~
+
+
+** Why
+
+- want some practice with c + tcl and shipping a complete program
+- tcl and tk are awesome
+- wayland seems to hold a bright future
+- yet to see a stacking wayland window manager (at least packaged for the distro that I use) that works intuitively, that works in a way that I like by default (cwm, openbox), and whose near-core behavior is easily customisable
+- want to experiment with seemingly cool ui, layout, ipc ideas
+- called "goose" because when you get tcl'd, you get goose-bumps
 
