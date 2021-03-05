@@ -19,7 +19,7 @@ Terms:
 - input: mouse, keyboard, etc.
 - output: monitor, etc.
 - root: structure of all frames
-- view: visible space, contains subset of all frames
+- view: visible space, contains subset of root
 - frame: contains windows
   - tab: laid out in tabs, front window totally visible, the rest totally hidden
   - pile: laid out in piles, front window totally visible, the rest partially/totally hidden

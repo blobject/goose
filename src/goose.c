@@ -3,17 +3,35 @@
 #include <getopt.h>
 #include <pango/pangocairo.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "goose.h"
 
 
 /* globals *******************************************************************/
 
-struct Server server = {0};
-int ipc_socket = -1;
+struct Server   _server = {0};
+int             _ipc_socket = -1;
+struct timespec _start_time = {-1, -1};
+Verbosity       _verbosity = LOG_LAST;
+bool            _colored = true;
+
+const char* log_colors[] = {
+  [LOG_QUIET] = "",
+  [LOG_ERROR] = "\x1B[1;31m",
+  [LOG_INFO]  = "\x1B[1;32m",
+  [LOG_DEBUG] = "\x1B[1;34m",
+};
+const char* log_tags[] = {
+  [LOG_QUIET] = "",
+  [LOG_ERROR] = "[ERROR]",
+  [LOG_INFO]  = "[INFO]",
+  [LOG_DEBUG] = "[DEBUG]",
+};
 
 
 /* entry *********************************************************************/
@@ -21,65 +39,72 @@ int ipc_socket = -1;
 int
 main(int argc, char** argv)
 {
-  int opt;
-  static struct option long_options[] = {
-    { "help", 0, NULL, 'h' },
-    { "version", 0, NULL, 'v' }
-  };
-
-  while ((opt = getopt_long(argc, argv, "hv", long_options, NULL)) != -1) {
-    if ('h' == opt) {
-      help(argv[0], EXIT_SUCCESS);
-    } else if ('v' == opt) {
-      version(argv[0]);
-      exit(EXIT_SUCCESS);
-    } else {
-      help(argv[0], EXIT_FAILURE);
-    }
+  int a;
+  if (0 != (a = argue(argc, argv))) {
+    exit(0 > a ? EXIT_FAILURE : EXIT_SUCCESS);
   }
-  if (optind < argc) {
-    help(argv[0], EXIT_FAILURE);
-  }
-
-  if (!getenv("XDG_RUNTIME_DIR")) {
-    ERR("XDG_RUNTIME_DIR must be set");
-  }
-
-  if (!drop_root()) {
-    fin_server(&server);
+  if (!init_all()) {
     exit(EXIT_FAILURE);
   }
-
-  signal(SIGTERM, handle_signal);
-  signal(SIGINT, handle_signal);
-  signal(SIGPIPE, SIG_IGN);
-
-  prep_init();
-  init_server();
-  init_ipc(&server);
-  setenv("WAYLAND_DISPLAY", server.socket, true);
-  if (!start_server(&server)) {
+  if (!start_server(&_server)) {
     quit(EXIT_FAILURE);
   }
-  run_server(&server);
+  spawn("imv");
+  run_server(&_server);
   quit(EXIT_SUCCESS);
 }
 
 
-static void
+int
+argue(int argc, char** argv)
+{
+  int opt;
+  struct option longs[] = {
+    { "help", 0, NULL, 'h' },
+    { "quiet", 0, NULL, 'q' },
+    { "verbose", 0, NULL, 'v' },
+    { "version", 0, NULL, 'V' }
+  };
+
+  while ((opt = getopt_long(argc, argv, "hv", longs, NULL)) != -1) {
+    if ('h' == opt) {
+      help(argv[0], EXIT_SUCCESS);
+      return 1;
+    } else if ('q' == opt) {
+      _verbosity = LOG_QUIET;
+    } else if ('v' == opt) {
+      _verbosity = LOG_INFO;
+      // count 'v's: debug
+    } else if ('V' == opt) {
+      version(argv[0]);
+      return 1;
+    } else {
+      help(argv[0], EXIT_FAILURE);
+      return -1;
+    }
+  }
+  if (optind < argc) {
+    help(argv[0], EXIT_FAILURE);
+    return -1;
+  }
+  return 0;
+}
+
+
+void
 help(char* me, int code)
 {
-  HONK(stdout, "Usage: %s -[hv]\n\
+  fprintf(EXIT_SUCCESS == code ? stdout : stderr,
+          "Usage: %s -[hv]\n\
   -h --help     show this help\n\
   -v --version  show version", me);
-  exit(code);
 }
 
 
 void
 version(char* me)
 {
-  HONK(stdout, "%s 0.1", me);
+  fprintf(stdout, "%s 0.1", me);
 }
 
 
@@ -90,24 +115,152 @@ handle_signal(int signal)
 }
 
 
+/* log ***********************************************************************/
+
+void
+init_log()
+{
+  init_time();
+  // TODO
+}
+
+
+void
+init_time(void)
+{
+  if (0 <= _start_time.tv_sec) {
+    return;
+  }
+  clock_gettime(CLOCK_MONOTONIC, &_start_time);
+}
+
+
+void
+honk(Verbosity v, const char* format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  _honk(v, format, args);
+  va_end(args);
+}
+
+
+void
+honk_va(Verbosity v, const char* format, va_list args)
+{
+  _honk(v, format, args);
+}
+
+
+void
+_honk(Verbosity v, const char* format, va_list args)
+{
+  init_time();
+  if (v > _verbosity) {
+    return;
+  }
+  unsigned c = (LOG_LAST > v) ? v : LOG_LAST - 1;
+  bool colored = _colored && isatty(STDERR_FILENO);
+  if (colored) {
+    fprintf(stderr, "%s", log_colors[c]);
+  }
+  fprintf(stderr, "%s%s ", ME, log_tags[c]);
+  vfprintf(stderr, format, args);
+  if (colored) {
+    fprintf(stderr, "\x1B[0m");
+  }
+  fprintf(stderr, "\n");
+}
+
+
+/* spawn *********************************************************************/
+
+void
+spawn(char* c)
+{
+  honk(LOG_DEBUG, "spawning child: %s", c);
+  int p[2];
+  if (0 != pipe(p)) {
+    honk(LOG_ERROR, "cannot create pipe for fork");
+  }
+  pid_t pid = -1;
+  pid_t child = -1;
+  if (0 == (pid = fork())) {
+    setsid();
+    sigset_t set;
+    sigemptyset(&set);
+    sigprocmask(SIG_SETMASK, &set, NULL);
+    close(p[0]);
+    if (0 == (child = fork())) {
+      close(p[1]);
+      honk(LOG_DEBUG, "starting imv");
+      execl("/bin/sh", "/bin/sh", "-c", c, (void*)NULL);
+      exit(0);
+    }
+    close(p[1]);
+    exit(0);
+  } else if (0 > pid) {
+    close(p[0]);
+    close(p[1]);
+    honk(LOG_ERROR, "cannot fork");
+    return;
+  }
+  close(p[1]);
+  close(p[0]);
+  waitpid(pid, NULL, 0);
+  if (0 < child) {
+    honk(LOG_DEBUG, "child created with pid: %d", child);
+  }
+}
+
+
+/* bump **********************************************************************/
+
+
 /* up ************************************************************************/
 
-static bool
+bool
+init_all(void) {
+  init_log(_verbosity);
+
+  if (!getenv("XDG_RUNTIME_DIR")) {
+    honk(LOG_ERROR, "XDG_RUNTIME_DIR must be set");
+    return false;
+  }
+
+  if (!drop_root()) {
+    return false;
+  }
+
+  signal(SIGTERM, handle_signal);
+  signal(SIGINT, handle_signal);
+  signal(SIGPIPE, SIG_IGN);
+
+  prep_init();
+  init_server();
+  init_ipc(&_server);
+  setenv("WAYLAND_DISPLAY", _server.socket, true);
+
+  return true;
+}
+
+
+bool
 drop_root(void)
 {
   if (getuid() != geteuid() || getgid() != getegid()) {
     // set gid first
-    if (setgid(getgid()) != 0) {
-      // TODO: log, cannot drop root group
+    if (0 != setgid(getgid())) {
+      honk(LOG_ERROR, "cannot drop root group");
       return false;
     }
-    if (setuid(getuid()) != 0) {
-      // TODO: log, cannot drop root user
+    if (0 != setuid(getuid())) {
+      honk(LOG_ERROR, "cannot drop root user");
       return false;
     }
   }
-  if (setgid(0) != -1 || setuid(0) != -1) {
-    // TODO: log, cannot drop root
+  if (-1 != setgid(0) || -1 != setuid(0)) {
+    honk(LOG_ERROR, "cannot drop root");
     return false;
   }
   return true;
@@ -117,12 +270,12 @@ drop_root(void)
 bool
 prep_init(void)
 {
-  // TODO: log, preparing wayland server init
-  server.display = wl_display_create();
-  server.event_loop = wl_display_get_event_loop(server.display);
-  server.backend = wlr_backend_autocreate(server.display, NULL);
-  if (!server.backend) {
-    // TODO: log, cannot create backend
+  honk(LOG_DEBUG, "preparing server init");
+  _server.display = wl_display_create();
+  _server.event_loop = wl_display_get_event_loop(_server.display);
+  _server.backend = wlr_backend_autocreate(_server.display, NULL);
+  if (!_server.backend) {
+    honk(LOG_ERROR, "cannot create backend");
     return false;
   }
   return true;
@@ -132,109 +285,111 @@ prep_init(void)
 bool
 init_server(void)
 {
-  // TODO: log, initialising wayland server
-  struct wlr_renderer* renderer = wlr_backend_get_renderer(server.backend);
+  honk(LOG_DEBUG, "initialising server");
+  struct wlr_renderer* renderer = wlr_backend_get_renderer(_server.backend);
   // TODO: what if no renderer?
-  wlr_renderer_init_wl_display(renderer, server.display);
-  server.compositor = wlr_compositor_create(server.display, renderer);
-  server.compositor_new_surface.notify = handle_compositor_new_surface;
-  wl_signal_add(&server.compositor->events.new_surface,
-                &server.compositor_new_surface);
-  server.data_device_manager = wlr_data_device_manager_create(server.display);
-  wlr_gamma_control_manager_v1_create(server.display);
-  server.new_output.notify = handle_new_output;
-  wl_signal_add(&server.backend->events.new_output, &server.new_output);
-  //server.output_layout_change.notify = handle_output_layout_change;
-  //wlr_xdg_output_manager_v1_create(server.display);
-  server.idle = wlr_idle_create(server.display);
-  //server.idle_inhibit_manager = sway_
-  server.layer_shell = wlr_layer_shell_v1_create(server.display);
-  wl_signal_add(&server.layer_shell->events.new_surface,
-                &server.layer_shell_surface);
-  server.layer_shell_surface.notify = handle_layer_shell_surface;
-  server.xdg_shell = wlr_xdg_shell_create(server.display);
-  wl_signal_add(&server.xdg_shell->events.new_surface,
-                &server.xdg_shell_surface);
-  server.xdg_shell_surface.notify = handle_xdg_shell_surface;
-  server.server_decoration_manager =
-    wlr_server_decoration_manager_create(server.display);
+  wlr_renderer_init_wl_display(renderer, _server.display);
+  _server.compositor = wlr_compositor_create(_server.display, renderer);
+  _server.compositor_new_surface.notify = handle_compositor_new_surface;
+  wl_signal_add(&_server.compositor->events.new_surface,
+                &_server.compositor_new_surface);
+  _server.data_device_manager =
+    wlr_data_device_manager_create(_server.display);
+  wlr_gamma_control_manager_v1_create(_server.display);
+  _server.new_output.notify = handle_new_output;
+  wl_signal_add(&_server.backend->events.new_output, &_server.new_output);
+  //_server.output_layout_change.notify = handle_output_layout_change;
+  //wlr_xdg_output_manager_v1_create(_server.display);
+  _server.idle = wlr_idle_create(_server.display);
+  //_server.idle_inhibit_manager = sway_
+  _server.layer_shell = wlr_layer_shell_v1_create(_server.display);
+  wl_signal_add(&_server.layer_shell->events.new_surface,
+                &_server.layer_shell_surface);
+  _server.layer_shell_surface.notify = handle_layer_shell_surface;
+  _server.xdg_shell = wlr_xdg_shell_create(_server.display);
+  wl_signal_add(&_server.xdg_shell->events.new_surface,
+                &_server.xdg_shell_surface);
+  _server.xdg_shell_surface.notify = handle_xdg_shell_surface;
+  _server.server_decoration_manager =
+    wlr_server_decoration_manager_create(_server.display);
   wlr_server_decoration_manager_set_default_mode(
-    server.server_decoration_manager,
+    _server.server_decoration_manager,
     WLR_SERVER_DECORATION_MANAGER_MODE_SERVER);
-  wl_signal_add(&server.server_decoration_manager->events.new_decoration,
-                &server.server_decoration);
-  server.server_decoration.notify = handle_server_decoration;
-  wl_list_init(&server.server_decorations);
-  server.xdg_decoration_manager =
-    wlr_xdg_decoration_manager_v1_create(server.display);
+  wl_signal_add(&_server.server_decoration_manager->events.new_decoration,
+                &_server.server_decoration);
+  _server.server_decoration.notify = handle_server_decoration;
+  wl_list_init(&_server.server_decorations);
+  _server.xdg_decoration_manager =
+    wlr_xdg_decoration_manager_v1_create(_server.display);
   wl_signal_add(
-    &server.xdg_decoration_manager->events.new_toplevel_decoration,
-    &server.xdg_decoration);
-  server.xdg_decoration.notify = handle_xdg_decoration;
-  wl_list_init(&server.xdg_decorations);
-  server.relative_pointer_manager =
-    wlr_relative_pointer_manager_v1_create(server.display);
-  server.pointer_constraints =
-    wlr_pointer_constraints_v1_create(server.display);
-  server.pointer_constraint.notify = handle_pointer_constraint;
-  wl_signal_add(&server.pointer_constraints->events.new_constraint,
-                &server.pointer_constraint);
-  server.presentation =
-    wlr_presentation_create(server.display, server.backend);
-  server.output_manager =
-    wlr_output_manager_v1_create(server.display);
-  server.output_manager_apply.notify = handle_output_manager_apply;
-  wl_signal_add(&server.output_manager->events.apply,
-                &server.output_manager_apply);
-  server.output_manager_test.notify = handle_output_manager_test;
-  wl_signal_add(&server.output_manager->events.test,
-                &server.output_manager_test);
-  server.output_power_manager =
-    wlr_output_power_manager_v1_create(server.display);
-  server.output_power_manager_set_mode.notify =
+    &_server.xdg_decoration_manager->events.new_toplevel_decoration,
+    &_server.xdg_decoration);
+  _server.xdg_decoration.notify = handle_xdg_decoration;
+  wl_list_init(&_server.xdg_decorations);
+  _server.relative_pointer_manager =
+    wlr_relative_pointer_manager_v1_create(_server.display);
+  _server.pointer_constraints =
+    wlr_pointer_constraints_v1_create(_server.display);
+  _server.pointer_constraint.notify = handle_pointer_constraint;
+  wl_signal_add(&_server.pointer_constraints->events.new_constraint,
+                &_server.pointer_constraint);
+  _server.presentation =
+    wlr_presentation_create(_server.display, _server.backend);
+  _server.output_manager =
+    wlr_output_manager_v1_create(_server.display);
+  _server.output_manager_apply.notify = handle_output_manager_apply;
+  wl_signal_add(&_server.output_manager->events.apply,
+                &_server.output_manager_apply);
+  _server.output_manager_test.notify = handle_output_manager_test;
+  wl_signal_add(&_server.output_manager->events.test,
+                &_server.output_manager_test);
+  _server.output_power_manager =
+    wlr_output_power_manager_v1_create(_server.display);
+  _server.output_power_manager_set_mode.notify =
     handle_output_power_manager_set_mode;
-  wl_signal_add(&server.output_power_manager->events.set_mode,
-                &server.output_power_manager_set_mode);
-  server.input_method_manager =
-    wlr_input_method_manager_v2_create(server.display);
-  server.text_input_manager = wlr_text_input_manager_v3_create(server.display);
-  server.foreign_toplevel_manager =
-    wlr_foreign_toplevel_manager_v1_create(server.display);
-  wlr_export_dmabuf_manager_v1_create(server.display);
-  wlr_screencopy_manager_v1_create(server.display);
-  wlr_data_control_manager_v1_create(server.display);
-  wlr_primary_selection_v1_device_manager_create(server.display);
-  wlr_viewporter_create(server.display);
+  wl_signal_add(&_server.output_power_manager->events.set_mode,
+                &_server.output_power_manager_set_mode);
+  _server.input_method_manager =
+    wlr_input_method_manager_v2_create(_server.display);
+  _server.text_input_manager =
+    wlr_text_input_manager_v3_create(_server.display);
+  _server.foreign_toplevel_manager =
+    wlr_foreign_toplevel_manager_v1_create(_server.display);
+  wlr_export_dmabuf_manager_v1_create(_server.display);
+  wlr_screencopy_manager_v1_create(_server.display);
+  wlr_data_control_manager_v1_create(_server.display);
+  wlr_primary_selection_v1_device_manager_create(_server.display);
+  wlr_viewporter_create(_server.display);
 
   char name[16];
   for (int i = 1; i <= 32; ++i) {
     sprintf(name, "wayland-%d", i);
-    if (wl_display_add_socket(server.display, name) >= 0) {
-      server.socket = strdup(name);
+    if (0 <= wl_display_add_socket(_server.display, name)) {
+      _server.socket = strdup(name);
       break;
     }
   }
-  if (!server.socket) {
-    // TODO: log, unable to open wayland socket
-    wlr_backend_destroy(server.backend);
+  if (!_server.socket) {
+    honk(LOG_ERROR, "cannot open wayland socket");
+    wlr_backend_destroy(_server.backend);
     return false;
   }
 
-  server.noop_backend = wlr_noop_backend_create(server.display);
-  struct wlr_output* output = wlr_noop_add_output(server.noop_backend);
-  server.headless_backend =
-    wlr_headless_backend_create_with_renderer(server.display, renderer);
-  if (!server.headless_backend) {
-    // TODO: log, cannot create headless backend, starting without
+  _server.noop_backend = wlr_noop_backend_create(_server.display);
+  struct wlr_output* output = wlr_noop_add_output(_server.noop_backend);
+  _server.headless_backend =
+    wlr_headless_backend_create_with_renderer(_server.display, renderer);
+  if (!_server.headless_backend) {
+    honk(LOG_INFO, "cannot create headless backend, starting without");
   } else {
-    wlr_multi_backend_add(server.backend, server.headless_backend);
+    wlr_multi_backend_add(_server.backend, _server.headless_backend);
   }
 
-  if (!server.txn_timeout_ms) {
-    server.txn_timeout_ms = 200;
+  if (!_server.txn_timeout_ms) {
+    _server.txn_timeout_ms = 200;
   }
-  //server.dirty_nodes = create_list();
-  //server.input = input_manager_create(server);
+  //_server.dirty_nodes = create_list();
+  //_server.input = input_manager_create(_server);
   //input_manager_get_default_seat();
 
   return true;
@@ -244,15 +399,18 @@ init_server(void)
 void
 init_ipc(struct Server* server)
 {
-  ipc_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (ipc_socket == -1) {
-    // TODO: quit, cannot create ipc socket
+  _ipc_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (-1 == _ipc_socket) {
+    honk(LOG_ERROR, "cannot create ipc socket");
+    quit(EXIT_FAILURE);
   }
-  if (fcntl(ipc_socket, F_SETFD, FD_CLOEXEC) == -1) {
-    // TODO: quit, cannot set CLOEXEC on ipc socket
+  if (-1 == fcntl(_ipc_socket, F_SETFD, FD_CLOEXEC)) {
+    honk(LOG_ERROR, "cannot set CLOEXEC on ipc socket");
+    quit(EXIT_FAILURE);
   }
-  if (fcntl(ipc_socket, F_SETFL, O_NONBLOCK) == -1) {
-    // TODO: quit, cannot set NONBLOCK on ipc socket
+  if (-1 == fcntl(_ipc_socket, F_SETFL, O_NONBLOCK)) {
+    honk(LOG_ERROR, "cannot set NONBLOCK on ipc socket");
+    quit(EXIT_FAILURE);
   }
 }
 
@@ -265,7 +423,7 @@ start_server(struct Server* server)
     wlr_xwayland_create(server->display, server->compositor,
                         false); // XWAYLAND_MODE_LAZY
   if (!server->xwayland.xwayland) {
-    // TODO: log, cannot start xwayland
+    honk(LOG_ERROR, "cannot start xwayland");
     unsetenv("DISPLAY");
   } else {
     wl_signal_add(&server->xwayland.xwayland->events.new_surface,
@@ -278,9 +436,9 @@ start_server(struct Server* server)
     /* xcursor configured by default seat */
   }
 #endif
-  // TODO: log, starting backend on wayland display: %s, server.socket
+  honk(LOG_INFO, "starting backend on display: %s", server->socket);
   if (!wlr_backend_start(server->backend)) {
-    // TODO: log, cannot start backend
+    honk(LOG_INFO, "cannot start backend");
     wlr_backend_destroy(server->backend);
     return false;
   }
@@ -291,7 +449,7 @@ start_server(struct Server* server)
 void
 run_server(struct Server* server)
 {
-  // TODO: log, running ME on wayland display: %s, server.socket
+  honk(LOG_INFO, "running %s on display: %s", ME, server->socket);
   wl_display_run(server->display);
 }
 
@@ -300,14 +458,14 @@ run_server(struct Server* server)
 
 void
 quit(int code) {
-  if (!server.display) {
+  if (!_server.display) {
     // ipc client
     exit(code);
   }
   // server
-  wl_display_terminate(server.display);
-  // TODO: log, closing
-  fin_server(&server);
+  wl_display_terminate(_server.display);
+  honk(LOG_INFO, "stopping %s on display: %s", ME, _server.socket);
+  fin_server(&_server);
   pango_cairo_font_map_set_default(NULL);
   exit(code);
 }
@@ -325,7 +483,7 @@ fin_server(struct Server* server) {
 
 /* desktop *******************************************************************/
 
-static void
+void
 handle_destroy(struct wl_listener* listener, void* data) {
   // TODO
 }
@@ -433,7 +591,7 @@ handle_xwayland_surface(struct wl_listener* listener, void* data)
 {
   struct wlr_xwayland_surface* surface = data;
   if (surface->override_redirect) {
-    // TODO: log, new xwayland unmanaged surface
+    honk(LOG_DEBUG, "new xwayland unmanaged surface");
     create_unmanaged(surface);
     return;
   }

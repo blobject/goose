@@ -37,11 +37,19 @@
 
 /* macros ********************************************************************/
 
-#define HONK(stream, fmt, ...) do { fprintf(stream, fmt "\n", ##__VA_ARGS__); } while (0)
-#define ERR(fmt, ...) do { HONK(stderr, fmt, ##__VA_ARGS__); exit(EXIT_FAILURE); } while (0)
+#define ME "goose"
 
 
 /* structures ****************************************************************/
+
+typedef enum {
+  LOG_QUIET = 0,
+  LOG_ERROR = 1,
+  LOG_INFO = 2,
+  LOG_DEBUG = 3,
+  LOG_LAST,
+} Verbosity;
+
 
 enum XwaylandAtom {
   NET_WM_WINDOW_TYPE_NORMAL,
@@ -117,13 +125,30 @@ struct Server {
 
 /* program */
 
-static void help(char* me, int code);
-static void version(char* me);
-static void handle_signal(int signal);
+int argue(int argc, char** argv);
+void help(char* me, int code);
+void version(char* me);
+void handle_signal(int signal);
+
+/* log */
+
+void handle_error(int signal);
+void init_time(void);
+void init_log(Verbosity v);
+void honk(Verbosity v, const char* format, ...);
+void honk_va(Verbosity v, const char* format, va_list args);
+void _honk(Verbosity v, const char* format, va_list args);
+
+/* spawn */
+
+void spawn(char* child);
+
+/* bump */
 
 /* server */
 
-static bool drop_root(void);
+bool init_all(void);
+bool drop_root(void);
 bool prep_init(void);
 bool init_server(void);
 void init_ipc(struct Server* server);
@@ -134,6 +159,7 @@ void fin_server(struct Server* server);
 
 /* desktop */
 
+void handle_destroy(struct wl_listener* listener, void* data);
 void handle_compositor_new_surface(struct wl_listener* listener, void* data);
 void handle_new_output(struct wl_listener* listener, void* data);
 void handle_output_layout_change(struct wl_listener* listener, void* data);
