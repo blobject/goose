@@ -2,7 +2,7 @@
 
 *Status:* pre-alpha
 
-Goose is a wayland compositor written in c and tcl/tk.
+Goose is a tcl'ish wayland compositor.
 
 Aspired features include:
 - good use of wlroots (device detection, multi-monitor, screensharing, etc.)
@@ -13,29 +13,6 @@ Aspired features include:
 - tagging (workspace-like behavior)
 - marking (for quick focusing)
 - overview (mac's exposé, spaces, mosaic, etc.; an extended alt-tab; a graphical configuration tool)
-
-
-Terms:
-- input: mouse, keyboard, etc.
-- output: monitor, etc.
-- root: structure of all frames
-- view: visible space, contains subset of root
-- frame: contains windows
-  - tab: laid out in tabs, front window totally visible, the rest totally hidden
-  - pile: laid out in piles, front window totally visible, the rest partially/totally hidden
-  - concat: laid out flat and adjoined, all windows totally visible
-- window: an application's immediate graphical representation
-- tag: an index on frames for visibility-toggling
-- mark: an index on frames for focus-toggling
-- get: state query (by a client)
-- set: state modification request (by a client)
-
-** Build
-
-1. ~cd goose/~
-1. ~$EDITOR config.mk~ and ~make~
-1. ~./build/goose~
-
 
 ** Why
 
