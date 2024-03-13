@@ -4,6 +4,7 @@ wm title . "Goose"
 
 set bindings_help {Keybindings:}
 
+# Add descriptions to bind
 rename bind original_bind
 proc bind {path binding action description} {
 	global bindings_help
