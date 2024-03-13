@@ -52,7 +52,7 @@ proc spawn {command} {
 		pack $win_name -fill both -expand true -side left -after [focus]
 	}
 	
-	# Add conent to the window
+	# Add content to the window
 	$win_name insert 1.0 $win_name
 
 	incr goose::next_id
