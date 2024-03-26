@@ -14,18 +14,16 @@ critcl::clibraries -lwlroots
 critcl::include wayland-server-core.h
 critcl::include wlr/backend.h
 
-critcl::argtype ulong {unsigned long}
-
-critcl::cproc wl_display_create {} {unsigned long} {
-    return (unsigned long) wl_display_create();
+critcl::cproc wl_display_create {} long {
+    return (long) wl_display_create();
 }
 
-critcl::cproc wl_display_get_event_loop {ulong wl_disp} {unsigned long} {
-    return (unsigned long) wl_display_get_event_loop(wl_disp);
+critcl::cproc wl_display_get_event_loop {long wl_disp} long {
+    return (long) wl_display_get_event_loop(wl_disp);
 }
 
-critcl::cproc wlr_backend_autocreate {ulong event_loop ulong session} {unsigned long} {
-    return (unsigned long) wlr_backend_autocreate(event_loop, NULL);
+critcl::cproc wlr_backend_autocreate {long event_loop long session} long {
+    return wlr_backend_autocreate(event_loop, NULL);
 }
 
 critcl::msg -nonewline { Building ...}
