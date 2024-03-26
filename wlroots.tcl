@@ -28,7 +28,7 @@ critcl::cproc wlr_backend_autocreate {long event_loop long session} long {
 
 critcl::msg -nonewline { Building ...}
 if {![critcl::load]} {
-    error "Building and loading the project failed."c
+    error "Building and loading the project failed."
 }
 
 package provide wlroots 1
