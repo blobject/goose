@@ -14,15 +14,27 @@ critcl::clibraries -lwlroots
 critcl::include wayland-server-core.h
 critcl::include wlr/backend.h
 
-critcl::cproc wl_display_create {} long {
-    return (long) wl_display_create();
+proc opaquePointerType {type} {
+    critcl::argtype $type "
+        sscanf(Tcl_GetString(@@), \"($type) 0x%p\", &@A);
+    " $type
+
+    critcl::resulttype $type "
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf(\"($type) 0x%lx\", (uintptr_t) rv));
+        return TCL_OK;
+    " $type
+}
+opaquePointerType void*
+
+critcl::cproc wl_display_create {} void* {
+    return wl_display_create();
 }
 
-critcl::cproc wl_display_get_event_loop {long wl_disp} long {
-    return (long) wl_display_get_event_loop(wl_disp);
+critcl::cproc wl_display_get_event_loop {void* wl_disp} void* {
+    return wl_display_get_event_loop(wl_disp);
 }
 
-critcl::cproc wlr_backend_autocreate {long event_loop long session} long {
+critcl::cproc wlr_backend_autocreate {void* event_loop void* session} void* {
     return wlr_backend_autocreate(event_loop, NULL);
 }
 
