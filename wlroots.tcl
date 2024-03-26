@@ -34,8 +34,8 @@ critcl::cproc wl_display_get_event_loop {void* wl_disp} void* {
     return wl_display_get_event_loop(wl_disp);
 }
 
-critcl::cproc wlr_backend_autocreate {void* event_loop void* session} void* {
-    return wlr_backend_autocreate(event_loop, NULL);
+critcl::cproc wlr_backend_autocreate {void* event_loop void* {session "(void*) 0x0"}}  void* {
+    return wlr_backend_autocreate(event_loop, session);
 }
 
 critcl::msg -nonewline { Building ...}
