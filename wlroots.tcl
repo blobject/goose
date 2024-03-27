@@ -34,13 +34,18 @@ critcl::cproc wl_display_get_event_loop {void* wl_disp} void* {
     return wl_display_get_event_loop(wl_disp);
 }
 
-critcl::cproc wlr_backend_autocreate {void* event_loop void* {session "(void*) 0x0"}}  void* {
+critcl::cproc wlr_backend_autocreate {void* event_loop void* {session "(void*) 0x0"}} void* {
     return wlr_backend_autocreate(event_loop, session);
 }
 
-critcl::cproc wlr_renderer_autocreate {void* backend}  void* {
+critcl::cproc wlr_renderer_autocreate {void* backend} void* {
     return wlr_renderer_autocreate(backend);
 }
+
+critcl::cproc wlr_renderer_init_wl_display {void* renderer void* display} void {
+    wlr_renderer_init_wl_display(renderer, display);
+}
+
 
 critcl::msg -nonewline { Building ...}
 if {![critcl::load]} {

@@ -1,4 +1,7 @@
 #! /usr/bin/env tclsh
+
+# wlroots-0.17
+
 lappend auto_path lib
 package require wlroots
 
@@ -17,3 +20,4 @@ set backend [wlr_backend_autocreate $display]
 show backend
 set renderer [wlr_renderer_autocreate $backend]
 show renderer
+wlr_renderer_init_wl_display $renderer $display
