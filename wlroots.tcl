@@ -38,6 +38,10 @@ critcl::cproc wlr_backend_autocreate {void* event_loop void* {session "(void*) 0
     return wlr_backend_autocreate(event_loop, session);
 }
 
+critcl::cproc wlr_renderer_autocreate {void* backend}  void* {
+    return wlr_renderer_autocreate(backend);
+}
+
 critcl::msg -nonewline { Building ...}
 if {![critcl::load]} {
     error "Building and loading the project failed."
