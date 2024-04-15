@@ -2,10 +2,14 @@
 
 package require Ffidl
 
-ffidl::callout wl_display_create {} pointer [ffidl::symbol libwlroots.so.12 wl_display_create]
-ffidl::callout wlr_backend_autocreate {pointer} pointer [ffidl::symbol libwlroots.so.12 wlr_backend_autocreate]
-ffidl::callout wlr_renderer_autocreate {pointer} pointer [ffidl::symbol libwlroots.so.12 wlr_renderer_autocreate]
-ffidl::callout wlr_renderer_init_wl_display {pointer pointer} int [ffidl::symbol libwlroots.so.12 wlr_renderer_init_wl_display]
+proc wlroots {function args_types ret_type} {
+	ffidl::callout $function $args_types $ret_type [ffidl::symbol libwlroots.so.12 $function]
+} 
+
+wlroots wl_display_create {} pointer
+wlroots wlr_backend_autocreate {pointer} pointer
+wlroots wlr_renderer_autocreate {pointer} pointer
+wlroots wlr_renderer_init_wl_display {pointer pointer} int
 
 set display [wl_display_create]
 set backend [wlr_backend_autocreate $display]
